@@ -77,9 +77,9 @@ app.get('/werkers/search/:positionName', (req, res) => {
  *  url_photo
  *  bio
  *  phone
- *  last_minute
- *  certifications[]
- *  positions[]
+ *  last_minute *default false
+ *  certifications[] *optional
+ *  positions[] *optional
  * creates new resource in db
  * sends back new db record
  */
@@ -146,13 +146,32 @@ app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
   return res.status(200).json(shiftsWithAddress);
 });
 
-// gets all shifts for werker based on invite status ('invite' or 'accept')
-app.get('/werkers/:werkerId/shifts/:status', async (req, res) => {
-  const { werkerId, status } = req.params;
-  const shifts = await dbHelpers.getInvitedOrAcceptedShifts(werkerId, status)
+// get all shifts a werker is eligible for based on positions
+app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
+  const { werkerId } = req.params;
+  const shifts = await dbHelpers.getShiftsForWerker(werkerId).catch(err => errorHandler(err, res));
+  console.log(shifts);
+  const shiftsWithAddress = await Promise.all(shifts
+    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
+  return res.status(200).json(shiftsWithAddress);
+});
+
+// histOrUpcoming is either 'history' or 'upcoming'
+app.get('/werkers/:werkerId/shifts/:histOrUpcoming', async (req, res) => {
+  const { werkerId, histOrUpcoming } = req.params;
+  const shifts = dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
     .catch(err => errorHandler(err, res));
   const shiftsWithAddress = await Promise.all(shifts
-    .map(shift => appendAddressToShift(shift))).catch(err => errorHandler(err, res));
+    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
+  return res.status(200).json(shiftsWithAddress);
+});
+
+// get all shifts werker is invited to
+app.get('/werkers/:werkerId/invitations', async (req, res) => {
+  const { werkerId } = req.params;
+  const shifts = await dbHelpers.getInvitedShifts(werkerId).catch(err => errorHandler(err, res));
+  const shiftsWithAddress = await Promise.all(shifts
+    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
   return res.status(200).json(shiftsWithAddress);
 });
 
@@ -191,37 +210,6 @@ app.delete('/shifts/:shiftId', (req, res) => {
       console.error(err);
       res.status(500).send('unable to delete');
     });
-});
-
-// get all shifts a werker is eligible for based on positions
-app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
-  const { werkerId } = req.params;
-  const shifts = await dbHelpers.getShiftsForWerker(werkerId).catch(err => errorHandler(err, res));
-  console.log(shifts);
-  const shiftsWithAddress = await Promise.all(shifts
-    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
-  return res.status(200).json(shiftsWithAddress);
-});
-
-// histOrUpcoming is either 'history' or 'upcoming'
-// status is 'accept'
-// histOrUpcoming does not apply if status is 'invite'
-app.get('/werkers/:werkerId/shifts/:histOrUpcoming', async (req, res) => {
-  const { werkerId, histOrUpcoming } = req.params;
-  const shifts = dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
-    .catch(err => errorHandler(err, res));
-  const shiftsWithAddress = await Promise.all(shifts
-    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
-  return res.status(200).json(shiftsWithAddress);
-});
-
-// get all shifts werker is invited to
-app.get('/werkers/:werkerId/invitations', async (req, res) => {
-  const { werkerId } = req.params;
-  const shifts = await dbHelpers.getInvitedShifts(werkerId).catch(err => errorHandler(err, res));
-  const shiftsWithAddress = await Promise.all(shifts
-    .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
-  return res.status(200).json(shiftsWithAddress);
 });
 
 // get all applications to a maker's shifts

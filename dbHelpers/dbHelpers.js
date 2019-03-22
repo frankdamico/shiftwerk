@@ -81,7 +81,7 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  * @param {string} info.email
  * @param {string} info.url_photo
  * @param {string} info.bio
- * @param {number} info.phone
+ * @param {string} info.phone
  * @param {boolean} info.last_minute
  * @param {Object[]} info.certifications
  * @param {string} info.certifications.cert_name
@@ -367,12 +367,19 @@ WHERE s."MakerId"=${id} AND r.type='maker'`)
  *
  * @param {Object[]} shifts - Shift instances from DB
  */
-const appendMakerAndRatingToShifts = shifts => Promise.all(shifts.map(shift => db.sequelize.query(`
+const appendMakerRatingPositionToShifts = shifts => Promise.all(shifts.map(shift => db.sequelize.query(`
   SELECT m.* from "Makers" m, "Shifts" s
   WHERE m.id=s."MakerId" AND s.id=${shift.id}`)
   .then(maker => Object.assign(shift, { maker: maker[0] }))
   .then(augmentedShift => getMakerRating(augmentedShift.MakerId)
-    .then(rating => Object.assign(augmentedShift, { rating })))));
+    .then(rating => Object.assign(augmentedShift, { rating }))
+    .then(shiftWithRating => db.sequelize.query(`
+      SELECT sp.*, p.*
+      FROM "ShiftPositions" sp
+      INNER JOIN "Positions" p
+      ON p.id=sp."PositionId"
+      WHERE sp."ShiftId"=${shiftWithRating.id}`)
+      .spread(positions => Object.assign(shiftWithRating, { positions }))))));
 
 /**
  * fetches all shifts werker is eligible for based on positions
@@ -391,7 +398,7 @@ INNER JOIN "WerkerPosition" wp
 INNER JOIN "Werkers" w
   ON w.id=wp."WerkerId"
 WHERE w.id=?`, { replacements: [id] })
-  .spread(shifts => appendMakerAndRatingToShifts(shifts));
+  .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 
 /**
  * deletes a shift from the database by id
@@ -417,7 +424,7 @@ ON sp. "ShiftId" = ia."ShiftPositionShiftId" AND sp."PositionId" = ia."ShiftPosi
 INNER JOIN "Werkers" w
 ON w.id = ia."WerkerId"
 WHERE ia.type='invite' AND w.id=${id} AND ia.status='pending'`)
-  .spread(shifts => shifts);
+  .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 
 /**
  * gets all shifts a werker has accepted, either past or future
@@ -440,7 +447,7 @@ const getAcceptedShifts = (id, histOrUpcoming) => {
   INNER JOIN "Werkers" w
   ON w.id=ia."WerkerId"
   WHERE w.id=? AND s.time_date ${option} 'now'`, { replacements: [id] })
-    .spread(fetchedShifts => appendMakerAndRatingToShifts(fetchedShifts));
+    .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 };
 
 /**
@@ -475,7 +482,7 @@ SELECT DISTINCT s.* FROM "Shifts" s
 INNER JOIN "ShiftPositions" sp
 ON s.id=sp."ShiftId"
 WHERE sp.filled=false AND s."MakerId"=?`, { replacements: [id] })
-  .spread(fetchedShifts => fetchedShifts);
+  .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 
 /**
  * Gets all shifts that have no unfilled positions for a maker
@@ -493,7 +500,7 @@ const getFulfilledShifts = (id, histOrUpcoming) => {
     SELECT * FROM "ShiftPositions" sp
     WHERE s.id=sp."ShiftId" AND sp.filled=false
   ) AND s."MakerId"=? AND s.time_date ${option} 'now'`, { replacements: [id] })
-    .spread(shifts => shifts);
+    .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 };
 
 const rateShift = (shiftId, werkerId, rating, type) => db.sequelize.query(`
