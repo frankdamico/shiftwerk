@@ -1,8 +1,19 @@
+/* eslint-disable no-unused-vars */
 /* eslint-disable camelcase */
 // const sequelize = require('sequelize');
 const db = require('../db/index');
 
 // WERKER
+
+/**
+ * gets the average of ratings received by werker
+ *
+ * @param {number} id - Werker id from DB
+ */
+const addRatingToWerker = werker => db.sequelize.query(`
+SELECT AVG(rating) FROM "Ratings" r
+WHERE r."WerkerId"=${werker.id} AND r.type='werker'`)
+  .spread(rating => Object.assign(werker, { rating }));
 
 /**
  * attaches a found werker's certifications and positions
@@ -11,7 +22,7 @@ const db = require('../db/index');
  * @returns {Promise<Object[]>} - Modified input array
  */
 
-const appendCertsAndPositionsToWerkers = werkers => Promise.all(werkers.map(werker => db.sequelize.query(`
+const appendCertsRatingsAndPositionsToWerkers = werkers => Promise.all(werkers.map(werker => db.sequelize.query(`
       SELECT c.*, wc.*
       FROM "Certifications" c
       INNER JOIN "WerkerCertifications" wc
@@ -19,7 +30,7 @@ const appendCertsAndPositionsToWerkers = werkers => Promise.all(werkers.map(werk
       INNER JOIN "Werkers" w
       ON w.id=wc."WerkerId"
       WHERE w.id=?`, { replacements: [werker.id] })
-  .then(certifications => Object.assign(werker, { certifications: certifications[0] }))
+  .spread(certifications => Object.assign(werker, { certifications }))
   .then(werkerWithCerts => db.sequelize.query(`
       SELECT p.position
       FROM "Positions" p
@@ -28,7 +39,8 @@ const appendCertsAndPositionsToWerkers = werkers => Promise.all(werkers.map(werk
       INNER JOIN "Werkers" w
       ON w.id=wp."WerkerId"
       WHERE w.id=?`, { replacements: [werkerWithCerts.id] })
-    .then(positions => Object.assign(werkerWithCerts, { positions: positions[0] })))));
+    .spread(positions => Object.assign(werkerWithCerts, { positions }))
+    .then(werkerWithCertsAndPositions => addRatingToWerker(werkerWithCertsAndPositions)))));
 
 /**
  * adds any number of certifications to a werker
@@ -58,8 +70,7 @@ const bulkAddCertificationToWerker = (werker, certifications) => Promise.all(cer
  */
 const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
   .map(position => db.models.Position.upsert(position, { returning: true })
-    // eslint-disable-next-line no-unused-vars
-    .then(([newPosition, updated]) => newPosition.addWerker(werker))));
+    .spread(newPosition => newPosition.addWerker(werker))));
 
 /**
  * adds new werker to DB, including certifications and positions
@@ -79,17 +90,44 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  * @param {string} info.positions.position
  */
 const addWerker = info => db.models.Werker.upsert(info, { returning: true })
-  .then(([newWerker, updated]) => bulkAddCertificationToWerker(newWerker, info.certifications)
+  .spread(newWerker => bulkAddCertificationToWerker(newWerker, info.certifications)
     .then(() => bulkAddPositionToWerker(newWerker, info.positions)));
 
 /**
- * Function to search for werkers by position
- * @param {object} data - an object with search terms
+ * Function to search for shifts by various terms
+ *
+ * @param {object} terms - an object with search terms
+ * @param {string} terms.position - required position
+ * @param {number} terms.proximity - maximum distance, in miles
+ * @param {number} terms.payment_amnt - minimum pay to accept
+ * @param {string} terms.payment_type - payment type to restrict results to
  */
-const getWerkersByTerm = data => db.models.Werker.find({
-  where: { id: data.PositionId },
-  include: [db.models.Position],
-});
+const getShiftsByTerm = async (terms) => {
+  const searchTerms = terms;
+  if (terms.position) {
+    const position = await db.models.Position.findOne({
+      where: {
+        position: terms.position,
+      },
+    });
+    searchTerms.position = position.dataValues.id;
+    console.log(searchTerms);
+  }
+  const conditions = {
+    position: terms.position ? `sp."PositionId" = ${terms.position}` : 'sp."PositionId" IS NOT NULL',
+    // proximity is future magic
+    payment_amnt: terms.payment_amnt ? `sp.payment_amnt >= ${terms.payment_amnt}` : 'sp.payment_amnt IS NOT NULL',
+    payment_type: terms.payment_type ? `s.payment_type = ${terms.payment_type}` : 's.payment_type IS NOT NULL',
+  };
+  return db.sequelize.query(`
+  SELECT * FROM "Shifts" s
+  INNER JOIN "ShiftPositions" sp
+  ON s.id=sp."ShiftId"
+  INNER JOIN "Positions" p
+  ON p.id=sp."PositionId"
+  WHERE ${conditions.position} AND ${conditions.payment_amnt} AND ${conditions.payment_type} AND sp.filled=false`)
+    .spread(shifts => shifts);
+};
 
 /**
  * gets all werkers eligible for a shift by their listed positions
@@ -109,10 +147,7 @@ INNER JOIN "Positions" p
 INNER JOIN "ShiftPositions" sp
   ON p.id=sp."PositionId"
 WHERE sp."ShiftId"=?`, { replacements: [id] })
-  .then((queryResult) => {
-    const fetchedWerkers = queryResult[0];
-    return appendCertsAndPositionsToWerkers(fetchedWerkers);
-  });
+  .spread(fetchedWerkers => appendCertsRatingsAndPositionsToWerkers(fetchedWerkers));
 
 /**
  * gets all werkers with a specific position
@@ -129,10 +164,7 @@ const getWerkersByPosition = position => db.sequelize.query(`
   INNER JOIN "Positions" p
     ON p.id=wp."PositionId"
   WHERE p.position=?`, { replacements: [position] })
-  .then((queryResult) => {
-    const fetchedWerkers = queryResult[0];
-    return appendCertsAndPositionsToWerkers(fetchedWerkers);
-  });
+  .spread(fetchedWerkers => appendCertsRatingsAndPositionsToWerkers(fetchedWerkers));
 
 /**
  * Function to invite a werker to a shift - creates a new invitation
@@ -178,7 +210,6 @@ const getWerkerProfile = id => db.models.Werker.findOne({
  */
 const bulkAddNewPositionsToShift = (shift, positions) => Promise.all(positions
   .map(position => db.models.Position.upsert(position, { returning: true })
-    // eslint-disable-next-line no-unused-vars
     .then(([newPosition, updated]) => db.models.ShiftPosition.upsert({
       ShiftId: shift.id,
       PositionId: newPosition.id,
@@ -221,44 +252,47 @@ const createShift = ({
 
 /**
  * Function used to apply for a shift - updates the shift status to 'Pending'
+ *
  * @param {number} shiftId - the id of the shift to be applied to
- * @param {number} werkerId - the of the werker applying to the shift
+ * @param {number} werkerId - the id of the werker applying or being invited to the shift
+ * @param {number} positionName - the name of the position applied or invited to
+ * @param {string} inviteOrApply - either "invite" or "apply" signifying
+ * invitation from maker or application from werker
  */
-const applyForShift = (shiftId, werkerId) => db.models.InviteApply.update({
-  status: 'Pending',
-  where: {
-    shiftId,
-    werkerId,
-  },
-});
+
+const applyOrInviteForShift = (shiftId, werkerId, positionName, inviteOrApply) => db.sequelize.query(`
+SELECT id FROM "Positions" WHERE position='${positionName}'`)
+  .then(([position, metadata]) => db.sequelize.query(`
+INSERT INTO "InviteApplies" ("WerkerId",
+"ShiftPositionShiftId", 
+"ShiftPositionPositionId", 
+"createdAt", 
+"updatedAt", 
+"type") VALUES (${werkerId}, ${shiftId}, ${position[0].id}, 'now', 'now', '${inviteOrApply}')`));
 
 /**
- * Function used to accept shifts - updates the shift status to 'Accepted'
+ * Function used to accept shifts - updates the shift status to 'accept' or 'decline'
  * @param {number} shiftId - the id of the shift to be accepted
  * @param {number} werkerId - the id of the werker accepting the shift
  */
-const acceptShift = (shiftId, werkerId) => db.models.InviteApply.update({
-  status: 'Accepted',
+const acceptOrDeclineShift = (shiftId, werkerId, status) => db.models.InviteApply.update({
+  status,
 }, {
   where: {
-    shiftId,
-    werkerId,
+    ShiftPositionShiftId: shiftId,
+    WerkerId: werkerId,
   },
-});
-
-/**
- * Function to decline shifts - updates the shift status to 'Declined'
- * @param {number} shiftId - the id of shift to be declined
- * @param {number} werkerId - the id of the werker declining the shift
- */
-// function to decline shifts
-const declineShift = (shiftId, werkerId) => db.models.InviteApply.update({
-  status: 'Declined',
-}, {
-  where: {
-    shiftId,
-    werkerId,
-  },
+  returning: true,
+}).then((updated) => {
+  const updatedEntry = updated[1][0].dataValues;
+  if (status === 'decline') {
+    return updatedEntry;
+  }
+  return db.sequelize.query(`
+  UPDATE "ShiftPositions" sp
+  SET filled=true
+  WHERE sp."ShiftId"=${updatedEntry.ShiftPositionShiftId} AND sp."PositionId"=${updatedEntry.ShiftPositionPositionId}`)
+    .spread(updatedShiftPosition => updatedShiftPosition);
 });
 
 /**
@@ -321,15 +355,24 @@ const getAllShifts = (offset = 0) => db.models.Shift.findAll({
   ],
 });
 
+const getMakerRating = id => db.sequelize.query(`
+SELECT AVG(rating) FROM "Ratings" r
+INNER JOIN "Shifts" s
+ON s.id=r."ShiftId"
+WHERE s."MakerId"=${id} AND r.type='maker'`)
+  .spread(rating => rating);
+
 /**
  * appends maker info to any number of shifts
  *
  * @param {Object[]} shifts - Shift instances from DB
  */
-const appendMakerToShifts = shifts => Promise.all(shifts.map(shift => db.sequelize.query(`
+const appendMakerAndRatingToShifts = shifts => Promise.all(shifts.map(shift => db.sequelize.query(`
   SELECT m.* from "Makers" m, "Shifts" s
-  WHERE m.id=s."MakerId"`)
-  .then(maker => Object.assign(shift, { maker: maker[0] }))));
+  WHERE m.id=s."MakerId" AND s.id=${shift.id}`)
+  .then(maker => Object.assign(shift, { maker: maker[0] }))
+  .then(augmentedShift => getMakerRating(augmentedShift.MakerId)
+    .then(rating => Object.assign(augmentedShift, { rating })))));
 
 /**
  * fetches all shifts werker is eligible for based on positions
@@ -348,10 +391,7 @@ INNER JOIN "WerkerPosition" wp
 INNER JOIN "Werkers" w
   ON w.id=wp."WerkerId"
 WHERE w.id=?`, { replacements: [id] })
-  .then((queryResult) => {
-    const fetchedShifts = queryResult[0];
-    return appendMakerToShifts(fetchedShifts);
-  });
+  .spread(shifts => appendMakerAndRatingToShifts(shifts));
 
 /**
  * deletes a shift from the database by id
@@ -364,34 +404,109 @@ const deleteShift = id => db.models.Shift.destroy({
 });
 
 /**
- * gets all shifts a werker has been invited to
+ * gets all shifts a werker has been invited to with status 'pending'
+ *
+ * @param {number} id - ID of werker fro DB
+ */
+const getInvitedShifts = id => db.sequelize.query(`
+SELECT * FROM "Shifts" s
+INNER JOIN "ShiftPositions" sp
+ON s.id = sp."ShiftId"
+INNER JOIN "InviteApplies" ia
+ON sp. "ShiftId" = ia."ShiftPositionShiftId" AND sp."PositionId" = ia."ShiftPositionPositionId"
+INNER JOIN "Werkers" w
+ON w.id = ia."WerkerId"
+WHERE ia.type='invite' AND w.id=${id} AND ia.status='pending'`)
+  .spread(shifts => shifts);
+
+/**
+ * gets all shifts a werker has accepted, either past or future
  *
  * @param {number} id - werker id from DB
- * @param {string} status - either 'pending' or 'accept'
+ * @param {string} histOrUpcoming - either 'history' or 'upcoming'
  * @returns {Promise<Object[]>} - An array of Shift objects
  */
 
-const getInvitedOrAcceptedShifts = (id, status) => db.sequelize.query(`
-SELECT * FROM "Shifts" s
+const getAcceptedShifts = (id, histOrUpcoming) => {
+  const option = histOrUpcoming === 'history'
+    ? '<'
+    : '>';
+  return db.sequelize.query(`
+  SELECT * FROM "Shifts" s
+  INNER JOIN "ShiftPositions" sp
+  ON s.id=sp."ShiftId"
+  INNER JOIN "InviteApplies" ia
+  ON sp."ShiftId"=ia."ShiftPositionShiftId" AND sp."PositionId"=ia."ShiftPositionPositionId"
+  INNER JOIN "Werkers" w
+  ON w.id=ia."WerkerId"
+  WHERE w.id=? AND s.time_date ${option} 'now'`, { replacements: [id] })
+    .spread(fetchedShifts => appendMakerAndRatingToShifts(fetchedShifts));
+};
+
+/**
+ * receives werker and shift info for every pending application
+ *
+ * @param {number} id - maker ID from DB
+ */
+
+const getApplicationsForShifts = id => db.sequelize.query(`
+SELECT DISTINCT w.*, s.name, p.position FROM "Werkers" w
 INNER JOIN "InviteApplies" ia
-ON s.id=ia."ShiftId"
-INNER JOIN "Werkers" w
 ON w.id=ia."WerkerId"
-WHERE w.id=? AND ia.status=? AND ia.type='invite'`, { replacements: [id, status] })
-  .then(queryResult => {
-    const fetchedShifts = queryResult[0];
-    return appendMakerToShifts(fetchedShifts);
-  });
+INNER JOIN "ShiftPositions" sp
+ON sp."ShiftId"=ia."ShiftPositionShiftId" AND sp."PositionId"=ia."ShiftPositionPositionId"
+INNER JOIN "Shifts" s
+ON s.id=sp."ShiftId"
+INNER JOIN "Makers" m
+ON m.id=s."MakerId"
+INNER JOIN "Positions" p
+ON sp."PositionId"=p.id
+WHERE ia.status = 'pending' AND ia.type = 'apply' AND m.id=${id}`)
+  .spread(fetchedWerkers => appendCertsRatingsAndPositionsToWerkers(fetchedWerkers));
+
+/**
+ * Gets all shifts that have some unfilled positions for a maker
+ *
+ * @param {number} id - maker ID from DB
+ */
+
+const getUnfulfilledShifts = id => db.sequelize.query(`
+SELECT DISTINCT s.* FROM "Shifts" s
+INNER JOIN "ShiftPositions" sp
+ON s.id=sp."ShiftId"
+WHERE sp.filled=false AND s."MakerId"=?`, { replacements: [id] })
+  .spread(fetchedShifts => fetchedShifts);
+
+/**
+ * Gets all shifts that have no unfilled positions for a maker
+ *
+ * @param {number} id - maker ID from DB
+ */
+
+const getFulfilledShifts = (id, histOrUpcoming) => {
+  const option = histOrUpcoming === 'history'
+    ? '<'
+    : '>';
+  return db.sequelize.query(`
+  SELECT DISTINCT s.* FROM "Shifts" s
+  WHERE NOT EXISTS (
+    SELECT * FROM "ShiftPositions" sp
+    WHERE s.id=sp."ShiftId" AND sp.filled=false
+  ) AND s."MakerId"=? AND s.time_date ${option} 'now'`, { replacements: [id] })
+    .spread(shifts => shifts);
+};
+
+const rateShift = (shiftId, werkerId, rating, type) => db.sequelize.query(`
+INSERT INTO "Ratings" ("ShiftId", "WerkerId", rating, type, "createdAt", "updatedAt") VALUES (${shiftId}, ${werkerId}, ${rating}, '${type}', 'now', 'now')`);
 
 module.exports = {
   getWerkerProfile,
   inviteWerker,
-  getWerkersByTerm,
+  getShiftsByTerm,
   getShiftsBySearchTermsAndVals,
-  declineShift,
-  acceptShift,
+  acceptOrDeclineShift,
   createShift,
-  applyForShift,
+  applyOrInviteForShift,
   getShiftsById,
   getAllShifts,
   deleteShift,
@@ -402,5 +517,10 @@ module.exports = {
   getWerkersForShift,
   getWerkersByPosition,
   getShiftsForWerker,
-  getInvitedOrAcceptedShifts,
+  getAcceptedShifts,
+  getInvitedShifts,
+  getApplicationsForShifts,
+  getUnfulfilledShifts,
+  getFulfilledShifts,
+  rateShift,
 };

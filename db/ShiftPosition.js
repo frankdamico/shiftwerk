@@ -7,6 +7,7 @@ module.exports = (sequelize, DataTypes) => {
   ShiftPosition.associate = (models) => {
     ShiftPosition.belongsTo(models.Shift);
     ShiftPosition.belongsTo(models.Position);
+    ShiftPosition.hasOne(models.InviteApply);
   };
   return ShiftPosition;
 };

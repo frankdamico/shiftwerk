@@ -11,4 +11,7 @@ module.exports = {
         "afterAll": "readonly",
         "xdescribe": "readonly",
     },
+    "rules": {
+        "no-console": "off"
+    }
 };
