@@ -20,14 +20,12 @@ const models = {
   Werker: sequelize.import('./Werker'),
   ShiftPosition: sequelize.import('./ShiftPosition'),
   Position: sequelize.import('./Position'),
-  PaymentType: sequelize.import('./PaymentType'),
   Maker: sequelize.import('./Maker'),
   Certification: sequelize.import('./Certification'),
   WerkerCertification: sequelize.import('./WerkerCertification'),
   Favorite: sequelize.import('./Favorite'),
   Rating: sequelize.import('./Rating'),
   InviteApply: sequelize.import('./InviteApply'),
-
 };
 
 Object.keys(models).forEach((modelName) => {

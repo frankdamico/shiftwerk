@@ -6,7 +6,6 @@ module.exports = (sequelize, DataTypes) => {
     lat: { type: DataTypes.NUMERIC, allowNull: false },
     long: { type: DataTypes.NUMERIC, allowNull: false },
     description: { type: DataTypes.STRING, allowNull: false },
-    payment_type: { type: DataTypes.STRING, allowNull: false },
     cache_rating: DataTypes.NUMERIC,
   });
 
@@ -14,9 +13,6 @@ module.exports = (sequelize, DataTypes) => {
     Shift.belongsTo(models.Maker);
     Shift.belongsToMany(models.Werker, {
       through: 'WerkerShift',
-    });
-    Shift.belongsToMany(models.PaymentType, {
-      through: 'ShiftPaymentType',
     });
     Shift.belongsToMany(models.Position, {
       through: models.ShiftPosition,

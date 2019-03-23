@@ -4,13 +4,23 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 const { google } = require('googleapis');
-// TODO need to make sure this is the correct path for dbHelpers
+
 const dbHelpers = require('../dbHelpers/dbHelpers.js');
-// const oauth2Client = new google.auth.OAuth2(
-//   '347712232584-9dv95ud3ilg9bk7vg8i0biqav62fh1q7.apps.googleusercontent.com',
-//   'WBbo3VF1_r9zsOovnfdi0h1Z',
-// );
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+);
+const people = google.people({
+  version: 'v1',
+  auth: oauth2Client,
+});
+const calendar = google.calendar({
+  version: 'v3',
+  auth: oauth2Client,
+});
 const { geocode, reverseGeocode } = require('../apiHelpers/tomtom');
 const { models } = require('../db/index');
 const twilio = require('../apiHelpers/twilio');
@@ -20,21 +30,67 @@ const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
+const getProfile = (idToken) => {
+  oauth2Client.setCredentials({
+    access_token: idToken.access_token,
+    refresh_token: '',
+  });
+  return people.people.get({
+    resourceName: 'people/me',
+    personFields: 'emailAddresses,names,photos,urls,phoneNumbers',
+  })
+    .then(res => res.data)
+    .catch(err => err);
+};
+
+const addToCalendar = async (token) => {
+  oauth2Client.setCredentials({
+    access_token: token.access_token,
+  });
+  const res = await calendar.events.insert({
+    calendarId: 'aeginidae@gmail.com',
+    resource: {
+      summary: 'hello world',
+      location: '6363 St Charles Ave, New Orleans, LA 70115',
+      description: 'hello',
+      start: {
+        dateTime: '2019-03-25T09:00:00-07:00',
+        timeZone: 'America/Chicago',
+      },
+      end: {
+        dateTime: '2019-03-25T10:00:00-07:00',
+        timeZone: 'America/Chicago',
+      },
+      attendees: [
+        { email: 'aeginidae@gmail.com' },
+      ],
+    },
+  });
+  console.log(res.data);
+};
 
 const errorHandler = (err, res) => {
   console.error(err);
   res.send(500, 'Something went wrong!');
 };
 
-const appendAddressToShift = async (shift, sequelizeInstance) => {
-  const address = await reverseGeocode(shift.lat, shift.long);
-  console.log(address);
-  if (!sequelizeInstance) {
-    return Object.assign(shift, { address });
-  }
-  // eslint-disable-next-line no-param-reassign
-  shift.dataValues.address = address;
-  return shift;
+const appendAddressToShift = (shift, sequelizeInstance) => {
+  return reverseGeocode(shift.lat, shift.long)
+    .then((address) => {
+      console.log(address);
+      if (!sequelizeInstance) {
+        return Object.assign(shift, { address });
+      }
+      // eslint-disable-next-line no-param-reassign
+      shift.dataValues.address = address;
+      return shift;
+    }).catch((err) => {
+      if (!sequelizeInstance) {
+        return Object.assign(shift, { address: 'We\re having some trouble with that. Please check again later!' });
+      }
+      shift.dataValues.address = 'We\re having some trouble with that. Please check again later!';
+      return shift;
+    });
 };
 
 app.put('/text', (req, res) => {
@@ -70,27 +126,48 @@ app.get('/werkers/search/:positionName', (req, res) => {
 
 /**
  * PUT /werkers
- * expects body with following properties:
- *  name_first
- *  name_last
- *  email
- *  url_photo
- *  bio
- *  phone
- *  last_minute *default false
- *  certifications[] *optional
- *  positions[] *optional
+ * expects JWT as body
  * creates new resource in db
  * sends back new db record
  */
 
 app.put('/werkers', (req, res) => {
-  dbHelpers.addWerker(req.body)
-    .then(newWerker => res.json(201, newWerker))
-    .catch((err) => {
-      console.error(err);
-      res.send(500, 'Something went wrong!');
-    });
+  console.log(req.body);
+  const newJWT = req.body;
+  // oauth2Client.credentials = newJWT;
+  return getProfile(newJWT)
+    .then((profile) => {
+      console.log(profile);
+      const newWerker = {
+        name_first: profile.names ? profile.names[0].givenName : '',
+        name_last: profile.names ? profile.names[0].familyName : '',
+        email: profile.emailAddresses ? profile.emailAddresses[0].value : '',
+        url_photo: profile.photos ? profile.photos[0].url : '',
+        phone: profile.phoneNumbers ? profile.phoneNumbers[0].value : '', // this is a guess!
+        bio: '',
+        certifications: [],
+        positions: [],
+      };
+      console.log(newWerker);
+      return dbHelpers.addWerker(newWerker);
+    })
+    .then(werker => res.json(201, werker))
+    .catch(err => errorHandler(err, res));
+});
+
+app.put('/werkers/login', (req, res) => {
+  const newJWT = req.body;
+  return getProfile(newJWT)
+    .then((profile) => {
+      console.log(profile);
+      return models.Werker.findOne({
+        where: {
+          email: profile.emailAddresses[0].value,
+        },
+      });
+    })
+    .then(werker => res.json(201, werker))
+    .catch(err => errorHandler(err));
 });
 
 // ----MAKER---- //
@@ -107,12 +184,38 @@ app.put('/werkers', (req, res) => {
  */
 
 app.put('/makers', (req, res) => {
-  models.Maker.create(req.body)
-    .then(newMaker => res.json(201, newMaker))
-    .catch((err) => {
-      console.error(err);
-      res.send(500, 'Something went wrong!');
-    });
+  console.log(req.body);
+  const newJWT = req.body;
+  // oauth2Client.credentials = newJWT;
+  return getProfile(newJWT)
+    .then((profile) => {
+      console.log(profile);
+      const newMaker = {
+        name: profile.names ? profile.names[0].displayName : '',
+        email: profile.emailAddresses ? profile.emailAddresses[0].value : '',
+        url_photo: profile.photos ? profile.photos[0].url : '',
+        phone: profile.phoneNumbers ? profile.phoneNumbers[0].value : '', // this is a guess!
+      };
+      console.log(newMaker);
+      return models.Maker.upsert(newMaker, { returning: true });
+    })
+    .then(maker => res.json(201, maker))
+    .catch(err => errorHandler(err, res));
+});
+
+app.put('/makers/login', (req, res) => {
+  const newJWT = req.body;
+  return getProfile(newJWT)
+    .then((profile) => {
+      console.log(profile);
+      return models.Maker.findOne({
+        where: {
+          email: profile.emailAddresses[0].value,
+        },
+      });
+    })
+    .then(maker => res.json(201, Object.assign(maker, { type: 'maker' })))
+    .catch(err => res.json(201, 'bad credentials'));
 });
 
 // get a maker's profile
@@ -172,6 +275,7 @@ app.get('/werkers/:werkerId/invitations', async (req, res) => {
   const shifts = await dbHelpers.getInvitedShifts(werkerId).catch(err => errorHandler(err, res));
   const shiftsWithAddress = await Promise.all(shifts
     .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
+  console.log(shiftsWithAddress);
   return res.status(200).json(shiftsWithAddress);
 });
 
@@ -182,18 +286,27 @@ app.get('/werkers/:werkerId/invitations', async (req, res) => {
  * expects body with the following properties:
  *  MakerId
  *  name
- *  time_date
- *  duration
+ *  start
+ *  end
  *  address
  *  description
  *  positions[]
  *   position is obj with:
  *   position
  *   payment_amnt
- *  payment_type
+ *   payment_type
  */
 app.put('/shifts', async (req, res) => {
   const { body } = req;
+  body.positions = body.positions.map((position) => {
+    const digit = /\d/.exec(Object.keys(position)[1])[0];
+    console.log(digit);
+    return {
+      position: position[`position${digit}`],
+      payment_amnt: position[`payment_amnt${digit}`],
+      payment_type: position[`payment_type${digit}`],
+    };
+  });
   const { lat, lon } = await geocode(body.address);
   body.lat = lat;
   body.long = lon;
@@ -243,6 +356,27 @@ app.get('/makers/:makerId/fulfilled/:histOrUpcoming', async (req, res) => {
 });
 
 // MAKER/WERKER //
+
+app.get('/favorites', (req, res) => {
+  const { id, type } = req.query;
+  return dbHelpers.getFavorites(id, type)
+    .then(faves => res.status(200).json(faves))
+    .catch(err => errorHandler(err));
+});
+
+app.put('/favorites', (req, res) => {
+  const { makerId, werkerId, type } = req.body;
+  return dbHelpers.addFavorite(makerId, werkerId, type)
+    .then(fave => res.status(201).json(fave))
+    .catch(err => errorHandler(err, res));
+});
+
+app.delete('/favorites', (req, res) => {
+  const { makerId, werkerId, type } = req.body;
+  return dbHelpers.deleteFavorite(makerId, werkerId, type)
+    .then(deleted => res.status(201).json(deleted))
+    .catch(err => errorHandler(err, res));
+});
 
 // get detailed shift info by Id for maker and werker
 app.get('/shifts/:shiftId', async (req, res) => {

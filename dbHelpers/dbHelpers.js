@@ -202,6 +202,34 @@ const getWerkerProfile = id => db.models.Werker.findOne({
   ],
 });
 
+// WERKER/MAKER //
+
+const addFavorite = (makerId, werkerId, type) => db.models.Favorite.upsert({
+  MakerId: makerId,
+  WerkerId: werkerId,
+  type,
+}, {
+  returning: true,
+});
+
+const deleteFavorite = (makerId, werkerId, type) => db.models.Favorite.destroy({
+  where: {
+    MakerId: makerId,
+    WerkerId: werkerId,
+    type,
+  },
+});
+
+const getFavorites = (id, type) => {
+  const propToFind = type[0].toUpperCase().concat(type.slice(1).concat('Id'));
+  return db.models.Favorite.findAll({
+    where: {
+      [propToFind]: id,
+      type,
+    },
+  });
+};
+
 // SHIFT
 
 /**
@@ -302,6 +330,7 @@ const acceptOrDeclineShift = (shiftId, werkerId, status) => db.models.InviteAppl
 const getShiftsBySearchTermsAndVals = data => db.models.ShiftPosition.find({
   where: { id: data.PositionId, payment_amnt: data.payment_amnt },
   include: [db.models.Shift, db.models.Position],
+  limit: 10,
 });
 
 /**
@@ -397,7 +426,7 @@ INNER JOIN "WerkerPosition" wp
   ON p.id=wp."PositionId"
 INNER JOIN "Werkers" w
   ON w.id=wp."WerkerId"
-WHERE w.id=?`, { replacements: [id] })
+WHERE w.id=? LIMIT 10`, { replacements: [id] })
   .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 
 /**
@@ -446,7 +475,8 @@ const getAcceptedShifts = (id, histOrUpcoming) => {
   ON sp."ShiftId"=ia."ShiftPositionShiftId" AND sp."PositionId"=ia."ShiftPositionPositionId"
   INNER JOIN "Werkers" w
   ON w.id=ia."WerkerId"
-  WHERE w.id=? AND s.time_date ${option} 'now'`, { replacements: [id] })
+  WHERE w.id=? AND s.time_date ${option} 'now'
+  LIMIT 10`, { replacements: [id] })
     .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 };
 
@@ -481,7 +511,8 @@ const getUnfulfilledShifts = id => db.sequelize.query(`
 SELECT DISTINCT s.* FROM "Shifts" s
 INNER JOIN "ShiftPositions" sp
 ON s.id=sp."ShiftId"
-WHERE sp.filled=false AND s."MakerId"=?`, { replacements: [id] })
+WHERE sp.filled=false AND s."MakerId"=?
+LIMIT 10`, { replacements: [id] })
   .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 
 /**
@@ -499,7 +530,8 @@ const getFulfilledShifts = (id, histOrUpcoming) => {
   WHERE NOT EXISTS (
     SELECT * FROM "ShiftPositions" sp
     WHERE s.id=sp."ShiftId" AND sp.filled=false
-  ) AND s."MakerId"=? AND s.time_date ${option} 'now'`, { replacements: [id] })
+  ) AND s."MakerId"=? AND s.time_date ${option} 'now'
+  LIMIT 10`, { replacements: [id] })
     .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 };
 
@@ -530,4 +562,7 @@ module.exports = {
   getUnfulfilledShifts,
   getFulfilledShifts,
   rateShift,
+  addFavorite,
+  deleteFavorite,
+  getFavorites,
 };
