@@ -159,7 +159,7 @@ app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
 // histOrUpcoming is either 'history' or 'upcoming'
 app.get('/werkers/:werkerId/shifts/:histOrUpcoming', async (req, res) => {
   const { werkerId, histOrUpcoming } = req.params;
-  const shifts = dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
+  const shifts = await dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
     .catch(err => errorHandler(err, res));
   const shiftsWithAddress = await Promise.all(shifts
     .map(shift => appendAddressToShift(shift, false))).catch(err => errorHandler(err, res));
