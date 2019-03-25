@@ -9,6 +9,7 @@ module.exports = (sequelize, DataTypes) => {
     last_minute: { type: DataTypes.BOOLEAN, defaultValue: false },
     lat: DataTypes.NUMERIC,
     long: DataTypes.NUMERIC,
+    address: DataTypes.STRING,
     cache_rating: DataTypes.NUMERIC,
   });
 

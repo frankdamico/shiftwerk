@@ -1,6 +1,5 @@
 module.exports = (sequelize, DataTypes) => {
   const Favorite = sequelize.define('Favorite', {
-    fav: DataTypes.BOOLEAN,
     type: DataTypes.STRING,
   });
 
