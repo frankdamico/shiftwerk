@@ -138,6 +138,7 @@ app.put('/werkers', (req, res) => {
         url_photo: profile.photos ? profile.photos[0].url : '',
         phone: profile.phoneNumbers ? profile.phoneNumbers[0].value : '', // this is a guess!
         bio: '',
+        address: '',
         certifications: [],
         positions: [],
       };
