@@ -279,10 +279,10 @@ app.get('/werkers/:werkerId/invitations', async (req, res) => {
 
 // MAKER-FACING //
 
-// app.get('/allshifts', (req, res) => {
-//   dbHelpers.getAllShifts()
-//     .then(shifts => res.status(200).json(shifts));
-// });
+app.get('/shifts', (req, res) => {
+  dbHelpers.getAllShifts()
+    .then(shifts => res.status(200).json(shifts));
+});
 
 /**
  * PUT /shifts
