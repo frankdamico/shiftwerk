@@ -4,75 +4,74 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const { google } = require('googleapis');
 
 const dbHelpers = require('../dbHelpers/dbHelpers.js');
+const { verifyToken, checkLogin, checkUser } = require('../auth/auth');
 
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-);
-const people = google.people({
-  version: 'v1',
-  auth: oauth2Client,
-});
-const calendar = google.calendar({
-  version: 'v3',
-  auth: oauth2Client,
-});
 const { geocode, reverseGeocode } = require('../apiHelpers/tomtom');
 const { models } = require('../db/index');
 const twilio = require('../apiHelpers/twilio');
+const { getGoogleProfile } = require('../apiHelpers/google');
 
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
-const getProfile = (idToken) => {
-  oauth2Client.setCredentials({
-    access_token: idToken.access_token,
-    refresh_token: '',
-  });
-  return people.people.get({
-    resourceName: 'people/me',
-    personFields: 'emailAddresses,names,photos,urls,phoneNumbers',
-  })
-    .then(res => res.data)
-    .catch(err => err);
-};
-
-const addToCalendar = async (token) => {
-  oauth2Client.setCredentials({
-    access_token: token.access_token,
-  });
-  const res = await calendar.events.insert({
-    calendarId: 'aeginidae@gmail.com',
-    resource: {
-      summary: 'hello world',
-      location: '6363 St Charles Ave, New Orleans, LA 70115',
-      description: 'hello',
-      start: {
-        dateTime: '2019-03-25T09:00:00-07:00',
-        timeZone: 'America/Chicago',
-      },
-      end: {
-        dateTime: '2019-03-25T10:00:00-07:00',
-        timeZone: 'America/Chicago',
-      },
-      attendees: [
-        { email: 'aeginidae@gmail.com' },
-      ],
-    },
-  });
-  console.log(res.data);
-};
+app.get('/shifts', (req, res) => {
+  dbHelpers.getAllShifts()
+    .then(shifts => res.status(200).json(shifts));
+});
 
 const errorHandler = (err, res) => {
   console.error(err);
-  res.send(500, 'Something went wrong!');
+  return res.send(500, 'Something went wrong!');
 };
+
+app.use(verifyToken);
+
+app.put('/werkers', (req, res, next) => {
+  req.user.type = 'werker';
+  return getGoogleProfile(req, res, next);
+});
+
+/**
+ * PUT /werkers
+ * expects JWT as body
+ * creates new resource in db
+ * sends back new db record
+ */
+
+app.put('/werkers', (req, res) => dbHelpers.addWerker(req.user)
+  .then(werker => res.json(201, werker))
+  .catch(err => errorHandler(err, res)));
+
+app.put('/makers', (req, res, next) => {
+  req.user.type = 'maker';
+  return getGoogleProfile(req, res, next);
+});
+
+/**
+ * PUT /makers
+ * expects body with the following properties:
+ *  name
+ *  url_photo
+ *  email
+ *  phone
+ * creates new resource in db
+ * sends back new db record
+ */
+
+app.put('/makers', (req, res) => {
+  console.log(req.user);
+  return models.Maker.upsert(req.user, {
+    returning: true,
+  })
+    .spread(maker => res.json(201, maker))
+    .catch(err => errorHandler(err, res));
+});
+
+app.use(checkLogin);
 
 app.put('/text', (req, res) => {
   const { body, to } = req.body;
@@ -117,124 +116,6 @@ app.get('/werkers/search/:positionName', (req, res) => {
     });
 });
 
-/**
- * PUT /werkers
- * expects JWT as body
- * creates new resource in db
- * sends back new db record
- */
-
-app.put('/werkers', (req, res) => {
-  console.log(req.body);
-  const newJWT = req.body;
-  // oauth2Client.credentials = newJWT;
-  return getProfile(newJWT)
-    .then((profile) => {
-      console.log(profile);
-      const newWerker = {
-        name_first: profile.names ? profile.names[0].givenName : '',
-        name_last: profile.names ? profile.names[0].familyName : '',
-        email: profile.emailAddresses ? profile.emailAddresses[0].value : '',
-        url_photo: profile.photos ? profile.photos[0].url : '',
-        phone: profile.phoneNumbers ? profile.phoneNumbers[0].value : '', // this is a guess!
-        bio: '',
-        address: '',
-        certifications: [],
-        positions: [],
-      };
-      console.log(newWerker);
-      return dbHelpers.addWerker(newWerker);
-    })
-    .then(werker => res.json(201, werker))
-    .catch(err => errorHandler(err, res));
-});
-
-/**
- * PATCH /werkers/:werkerId
- * expects any number of changed values according to {@link dbHelpers#updateWerker}
- */
-app.patch('/werkers/:werkerId', (req, res) => {
-  const { werkerId } = req.params;
-  const settings = req.body;
-  if (settings.address) {
-    return geocode(settings.address)
-      .then(({ lat, lon }) => {
-        settings.lat = lat;
-        settings.long = lon;
-        return reverseGeocode(lat, lon);
-      })
-      .then(address => dbHelpers.updateWerker(werkerId, Object.assign(settings, { address })))
-      .then(updatedWerker => res.status(204).send())
-      .catch(err => errorHandler(err, res));
-  }
-  return dbHelpers.updateWerker(werkerId, settings)
-    .then(updatedWerker => res.status(204).send())
-    .catch(err => errorHandler(err, res));
-});
-
-app.put('/werkers/login', (req, res) => {
-  const newJWT = req.body;
-  return getProfile(newJWT)
-    .then((profile) => {
-      console.log(profile);
-      return models.Werker.findOne({
-        where: {
-          email: profile.emailAddresses[0].value,
-        },
-      });
-    })
-    .then(werker => res.status(201).json(werker))
-    .catch(err => errorHandler(err, res));
-});
-
-// ----MAKER---- //
-
-/**
- * PUT /makers
- * expects body with the following properties:
- *  name
- *  url_photo
- *  email
- *  phone
- * creates new resource in db
- * sends back new db record
- */
-
-app.put('/makers', (req, res) => {
-  console.log(req.body);
-  const newJWT = req.body;
-  // oauth2Client.credentials = newJWT;
-  return getProfile(newJWT)
-    .then((profile) => {
-      console.log(profile);
-      const newMaker = {
-        name: profile.names ? profile.names[0].displayName : '',
-        email: profile.emailAddresses ? profile.emailAddresses[0].value : '',
-        url_photo: profile.photos ? profile.photos[0].url : '',
-        phone: profile.phoneNumbers ? profile.phoneNumbers[0].value : '', // this is a guess!
-      };
-      console.log(newMaker);
-      return models.Maker.upsert(newMaker, { returning: true });
-    })
-    .then(maker => res.json(201, maker))
-    .catch(err => errorHandler(err, res));
-});
-
-app.put('/makers/login', (req, res) => {
-  const newJWT = req.body;
-  return getProfile(newJWT)
-    .then((profile) => {
-      console.log(profile);
-      return models.Maker.findOne({
-        where: {
-          email: profile.emailAddresses[0].value,
-        },
-      });
-    })
-    .then(maker => res.json(201, Object.assign(maker, { type: 'maker' })))
-    .catch(err => res.json(201, 'bad credentials'));
-});
-
 // get a maker's profile
 app.get('/makers/:makerId', (req, res) => {
   models.Maker.findOne({ where: { id: req.params.makerId } })
@@ -245,43 +126,10 @@ app.get('/makers/:makerId', (req, res) => {
     });
 });
 
-// ----SHIFT---- //
-
-// WERKER-FACING //
-
 // get list of shifts by terms
 app.get('/werkers/:werkerId/shifts', async (req, res) => {
   const shifts = await dbHelpers.getShiftsByTerm(req.query).catch(err => errorHandler(err, res));
   return res.status(200).json(shifts);
-});
-
-// gets all shifts a werker is eligible for based on positions
-app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
-  const { werkerId } = req.params;
-  const shifts = await dbHelpers.getShiftsForWerker(werkerId).catch(err => errorHandler(err, res));
-  return res.status(200).json(shifts);
-});
-
-// histOrUpcoming is either 'history' or 'upcoming'
-app.get('/werkers/:werkerId/shifts/:histOrUpcoming', async (req, res) => {
-  const { werkerId, histOrUpcoming } = req.params;
-  const shifts = await dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
-    .catch(err => errorHandler(err, res));
-  return res.status(200).json(shifts);
-});
-
-// get all shifts werker is invited to
-app.get('/werkers/:werkerId/invitations', async (req, res) => {
-  const { werkerId } = req.params;
-  const shifts = await dbHelpers.getInvitedShifts(werkerId).catch(err => errorHandler(err, res));
-  return res.status(200).json(shifts);
-});
-
-// MAKER-FACING //
-
-app.get('/shifts', (req, res) => {
-  dbHelpers.getAllShifts()
-    .then(shifts => res.status(200).json(shifts));
 });
 
 /**
@@ -328,6 +176,99 @@ app.delete('/shifts/:shiftId', (req, res) => {
       res.status(500).send('unable to delete');
     });
 });
+
+// get detailed shift info by Id for maker and werker
+app.get('/shifts/:shiftId', async (req, res) => {
+  const { shiftId } = req.params;
+  // TODO check helper function name
+  const shift = await dbHelpers.getShiftsById(shiftId).catch(err => errorHandler(err, res));
+  return res.status(200).json(shift);
+});
+
+app.use(checkUser);
+
+/**
+ * PATCH /werkers/:werkerId
+ * expects any number of changed values according to {@link dbHelpers#updateWerker}
+ */
+app.patch('/werkers/:werkerId', (req, res) => {
+  const { werkerId } = req.params;
+  const settings = req.body;
+  if (settings.address) {
+    return geocode(settings.address)
+      .then(({ lat, lon }) => {
+        settings.lat = lat;
+        settings.long = lon;
+        return reverseGeocode(lat, lon);
+      })
+      .then(address => dbHelpers.updateWerker(werkerId, Object.assign(settings, { address })))
+      .then(updatedWerker => res.status(204).send())
+      .catch(err => errorHandler(err, res));
+  }
+  return dbHelpers.updateWerker(werkerId, settings)
+    .then(updatedWerker => res.status(204).send())
+    .catch(err => errorHandler(err, res));
+});
+
+// app.put('/werkers/login', (req, res) => {
+//   const newJWT = req.body;
+//   return getProfile(newJWT)
+//     .then((profile) => {
+//       console.log(profile);
+//       return models.Werker.findOne({
+//         where: {
+//           email: profile.emailAddresses[0].value,
+//         },
+//       });
+//     })
+//     .then(werker => res.status(201).json(werker))
+//     .catch(err => errorHandler(err, res));
+// });
+
+// ----MAKER---- //
+
+// app.put('/makers/login', (req, res) => {
+//   const newJWT = req.body;
+//   return getProfile(newJWT)
+//     .then((profile) => {
+//       console.log(profile);
+//       return models.Maker.findOne({
+//         where: {
+//           email: profile.emailAddresses[0].value,
+//         },
+//       });
+//     })
+//     .then(maker => res.json(201, Object.assign(maker, { type: 'maker' })))
+//     .catch(err => res.json(201, 'bad credentials'));
+// });
+
+// ----SHIFT---- //
+
+// WERKER-FACING //
+
+// gets all shifts a werker is eligible for based on positions
+app.get('/werkers/:werkerId/shifts/available', async (req, res) => {
+  const { werkerId } = req.params;
+  const shifts = await dbHelpers.getShiftsForWerker(werkerId).catch(err => errorHandler(err, res));
+  return res.status(200).json(shifts);
+});
+
+// histOrUpcoming is either 'history' or 'upcoming'
+app.get('/werkers/:werkerId/shifts/:histOrUpcoming', async (req, res) => {
+  const { werkerId, histOrUpcoming } = req.params;
+  const shifts = await dbHelpers.getAcceptedShifts(werkerId, histOrUpcoming)
+    .catch(err => errorHandler(err, res));
+  return res.status(200).json(shifts);
+});
+
+// get all shifts werker is invited to
+app.get('/werkers/:werkerId/invitations', async (req, res) => {
+  const { werkerId } = req.params;
+  const shifts = await dbHelpers.getInvitedShifts(werkerId).catch(err => errorHandler(err, res));
+  return res.status(200).json(shifts);
+});
+
+// MAKER-FACING //
 
 // get all applications to a maker's shifts
 app.get('/makers/:makerId/applications', async (req, res) => {
@@ -378,14 +319,6 @@ app.delete('/favorites', (req, res) => {
     .catch(err => errorHandler(err, res));
 });
 
-// get detailed shift info by Id for maker and werker
-app.get('/shifts/:shiftId', async (req, res) => {
-  const { shiftId } = req.params;
-  // TODO check helper function name
-  const shift = await dbHelpers.getShiftsById(shiftId).catch(err => errorHandler(err, res));
-  return res.status(200).json(shift);
-});
-
 // apply or invite for shift
 // applyOrInvite must be string "apply" or "invite"
 app.put('/shifts/:shiftId/:applyOrInvite/:werkerId/:positionName', (req, res) => {
@@ -427,10 +360,6 @@ app.put('/shifts/:shiftId/:werkerId/rating/:type/:rating', async (req, res) => {
   } = req.params;
   const newRating = await dbHelpers.rateShift(shiftId, werkerId, rating, type).catch(err => errorHandler(err, res));
   return res.send(201, newRating);
-});
-
-app.put('/auth', (req, res) => {
-  const { tokens } = google;
 });
 
 const port = process.env.PORT || 4000;

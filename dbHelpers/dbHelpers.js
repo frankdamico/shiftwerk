@@ -76,13 +76,14 @@ const appendCertsRatingsAndPositionsToWerkers = werkers => Promise.all(werkers.m
 const bulkAddCertificationToWerker = (werker, certifications) => Promise.all(certifications
   .map(certification => db.models.Certification.upsert(certification, { returning: true })
     // eslint-disable-next-line no-unused-vars
-    .spread(([newCert, updated]) => db.models.WerkerCertification.upsert({
+    .spread(newCert => db.models.WerkerCertification.upsert({
       WerkerId: werker.id,
       CertificationId: newCert.id,
       url_Photo: certification.url_Photo,
     }, {
       returning: true,
-    }))));
+    }))))
+  .then(() => werker);
 
 /**
  * adds any number of new positions to db and werker
@@ -93,12 +94,14 @@ const bulkAddCertificationToWerker = (werker, certifications) => Promise.all(cer
  */
 const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
   .map(position => db.models.Position.upsert(position, { returning: true })
-    .spread(newPosition => newPosition.addWerker(werker))));
+    .spread(newPosition => newPosition.addWerker(werker))))
+  .then(() => werker);
 
 /**
  * adds new werker to DB, including certifications and positions
  *
  * @param {Object} info
+ * @param {string} info.google_id
  * @param {string} info.name_first
  * @param {string} info.name_last
  * @param {string} info.email
@@ -112,13 +115,25 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  * @param {Object[]} info.positions
  * @param {string} info.positions.position
  */
-const addWerker = info => db.models.Werker.upsert(info, { returning: true })
-  .spread(newWerker => info.certifications
-    ? bulkAddCertificationToWerker(newWerker, info.certifications)
-    : new Promise(resolve => resolve(newWerker))
-      .then(() => info.positions
-        ? bulkAddPositionToWerker(newWerker, info.positions)
-        : new Promise(resolve => resolve(newWerker))));
+const addWerker = (info) => {
+  const werkerProps = {
+    google_id: info.google_id,
+    name_first: info.name_first,
+    name_last: info.name_last,
+    email: info.email,
+    url_photo: info.url_photo,
+    phone: info.phone,
+  };
+  return db.models.Werker.findOrCreate({
+    where: werkerProps,
+  })
+    .spread(newWerker => info.certifications
+      ? bulkAddCertificationToWerker(newWerker, info.certifications)
+      : new Promise(resolve => resolve(newWerker))
+        .then(() => info.positions
+          ? bulkAddPositionToWerker(newWerker, info.positions)
+          : new Promise(resolve => resolve(newWerker))));
+};
 
 /**
  * updates Werker entry in DB

@@ -1,5 +1,6 @@
 module.exports = (sequelize, DataTypes) => {
   const Maker = sequelize.define('Maker', {
+    google_id: { type: DataTypes.STRING, unique: true },
     name: { type: DataTypes.STRING, unique: true, allowNull: false },
     url_photo: { type: DataTypes.STRING, allowNull: false },
     phone: DataTypes.STRING,
