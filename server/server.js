@@ -214,7 +214,7 @@ app.get('/shifts/:shiftId', async (req, res) => {
 
 // RESTRICTED EXCEPT TO INDIVIDUAL USERS //
 
-app.use(checkUser);
+// app.use(checkUser);
 
 /**
  * PATCH /werkers/:werkerId
