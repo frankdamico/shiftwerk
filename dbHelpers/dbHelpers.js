@@ -117,15 +117,14 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  */
 const addWerker = (info) => {
   const werkerProps = {
-    google_id: info.google_id,
     name_first: info.name_first,
     name_last: info.name_last,
     email: info.email,
     url_photo: info.url_photo,
     phone: info.phone,
   };
-  return db.models.Werker.findOrCreate({
-    where: werkerProps,
+  return db.models.Werker.upsert(werkerProps, {
+    returning: true,
   })
     .spread(newWerker => info.certifications
       ? bulkAddCertificationToWerker(newWerker, info.certifications)

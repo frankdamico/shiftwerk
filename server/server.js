@@ -42,7 +42,7 @@ const errorHandler = (err, res) => {
  * sends back new db record
  */
 
-app.put('/werkers', (req, res) => dbHelpers.addWerker(req.user)
+app.put('/werkers', (req, res) => dbHelpers.addWerker(req.body)
   .then(werker => res.json(201, werker))
   .catch(err => errorHandler(err, res)));
 
@@ -63,8 +63,8 @@ app.put('/werkers', (req, res) => dbHelpers.addWerker(req.user)
  */
 
 app.put('/makers', (req, res) => {
-  console.log(req.user);
-  return models.Maker.upsert(req.user, {
+  console.log(req.body);
+  return models.Maker.upsert(req.body, {
     returning: true,
   })
     .spread(maker => res.json(201, maker))
