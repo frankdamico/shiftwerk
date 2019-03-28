@@ -6,27 +6,54 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 
 const dbHelpers = require('../dbHelpers/dbHelpers.js');
-const { verifyToken, checkLogin, checkUser } = require('../auth/auth');
+const { loginFlow, checkLogin, checkUser } = require('../auth/auth');
 
 const { geocode, reverseGeocode } = require('../apiHelpers/tomtom');
 const { models } = require('../db/index');
 const twilio = require('../apiHelpers/twilio');
-const { getGoogleProfile } = require('../apiHelpers/google');
 
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
 
+app.get('/login', (req, res) => {
+  const { code, type } = req.query;
+  return loginFlow(code, type)
+    .then((token) => {
+      if (token) {
+        console.log(token);
+        return res.status(201).send(token);
+      }
+      throw new Error('Something went wrong validating your credentials!');
+    })
+    .catch(err => res.status(500).send(err));
+});
+
 app.get('/shifts', (req, res) => {
   dbHelpers.getAllShifts()
     .then(shifts => res.status(200).json(shifts));
 });
 
+// NEED A VALID TOKEN BEYOND HERE //
+
+app.use(checkLogin);
+
 const errorHandler = (err, res) => {
   console.error(err);
   return res.send(500, 'Something went wrong!');
 };
+
+app.get('/user', (req, res) => {
+  if (req.user.type === 'werker') {
+    return dbHelpers.getWerkerProfile(req.user.id)
+      .then(werker => res.status(200).json(werker))
+      .catch(err => errorHandler(err));
+  }
+  return models.Maker.findById(req.user.id)
+    .then(maker => res.status(200).json(maker))
+    .catch(err => errorHandler(err));
+});
 
 // app.use(verifyToken);
 
@@ -185,7 +212,9 @@ app.get('/shifts/:shiftId', async (req, res) => {
   return res.status(200).json(shift);
 });
 
-// app.use(checkUser);
+// RESTRICTED EXCEPT TO INDIVIDUAL USERS //
+
+app.use(checkUser);
 
 /**
  * PATCH /werkers/:werkerId
@@ -209,38 +238,6 @@ app.patch('/werkers/:werkerId', (req, res) => {
     .then(updatedWerker => res.status(204).send())
     .catch(err => errorHandler(err, res));
 });
-
-// app.put('/werkers/login', (req, res) => {
-//   const newJWT = req.body;
-//   return getProfile(newJWT)
-//     .then((profile) => {
-//       console.log(profile);
-//       return models.Werker.findOne({
-//         where: {
-//           email: profile.emailAddresses[0].value,
-//         },
-//       });
-//     })
-//     .then(werker => res.status(201).json(werker))
-//     .catch(err => errorHandler(err, res));
-// });
-
-// ----MAKER---- //
-
-// app.put('/makers/login', (req, res) => {
-//   const newJWT = req.body;
-//   return getProfile(newJWT)
-//     .then((profile) => {
-//       console.log(profile);
-//       return models.Maker.findOne({
-//         where: {
-//           email: profile.emailAddresses[0].value,
-//         },
-//       });
-//     })
-//     .then(maker => res.json(201, Object.assign(maker, { type: 'maker' })))
-//     .catch(err => res.json(201, 'bad credentials'));
-// });
 
 // ----SHIFT---- //
 
@@ -298,6 +295,10 @@ app.get('/makers/:makerId/fulfilled/:histOrUpcoming', async (req, res) => {
 
 // MAKER/WERKER //
 
+/**
+ * id - id of user from DB
+ * type - either 'werker' or 'maker'
+ */
 app.get('/favorites', (req, res) => {
   const { id, type } = req.query;
   return dbHelpers.getFavorites(id, type)

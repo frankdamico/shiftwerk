@@ -1,6 +1,8 @@
 module.exports = (sequelize, DataTypes) => {
   const Werker = sequelize.define('Werker', {
     google_id: { type: DataTypes.STRING, unique: true },
+    access_token: DataTypes.STRING,
+    refresh_token: DataTypes.STRING,
     name_first: DataTypes.STRING,
     name_last: DataTypes.STRING,
     email: { type: DataTypes.STRING, allowNull: false, unique: true },

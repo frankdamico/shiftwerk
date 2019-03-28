@@ -101,7 +101,8 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  * adds new werker to DB, including certifications and positions
  *
  * @param {Object} info
- * @param {string} info.google_id
+ * @param {string} info.access_token
+ * @param {string} info.refresh_token
  * @param {string} info.name_first
  * @param {string} info.name_last
  * @param {string} info.email
@@ -117,6 +118,8 @@ const bulkAddPositionToWerker = (werker, positions) => Promise.all(positions
  */
 const addWerker = (info) => {
   const werkerProps = {
+    access_token: info.access_token,
+    refresh_token: info.refresh_token,
     name_first: info.name_first,
     name_last: info.name_last,
     email: info.email,
@@ -126,6 +129,15 @@ const addWerker = (info) => {
   return db.models.Werker.upsert(werkerProps, {
     returning: true,
   })
+    .catch((err) => {
+      if (err.message === 'Validation error') {
+        return db.models.Werker.upsert(werkerProps,
+          {
+            returning: true,
+          });
+      }
+      return new Error('Something went wrong');
+    })
     .spread(newWerker => info.certifications
       ? bulkAddCertificationToWerker(newWerker, info.certifications)
       : new Promise(resolve => resolve(newWerker))
@@ -284,6 +296,13 @@ const getWerkerProfile = id => db.models.Werker.findOne({
 
 // WERKER/MAKER //
 
+/**
+ * creates a new "favorites" entry in the DB, either maker->werker or werker->maker
+ *
+ * @param {number} makerId - id from DB
+ * @param {number} werkerId - id from DB
+ * @param {string} type - either 'werker' or 'maker'
+ */
 const addFavorite = (makerId, werkerId, type) => db.models.Favorite.findOrCreate({
   where: {
     MakerId: makerId,
@@ -292,6 +311,13 @@ const addFavorite = (makerId, werkerId, type) => db.models.Favorite.findOrCreate
   },
 }).spread(favorite => favorite);
 
+/**
+ * removes a favorite from DB
+ *
+ * @param {number} makerId - id from DB
+ * @param {number} werkerId - id from DB
+ * @param {string} type - either 'werker' or 'maker'
+ */
 const deleteFavorite = (makerId, werkerId, type) => db.models.Favorite.destroy({
   where: {
     MakerId: makerId,
@@ -300,6 +326,12 @@ const deleteFavorite = (makerId, werkerId, type) => db.models.Favorite.destroy({
   },
 });
 
+/**
+ * retrieves all favorites for a given user
+ *
+ * @param {number} id - either werker or maker ID from DB
+ * @param {string} type - either 'werker' or 'maker'
+ */
 const getFavorites = (id, type) => {
   const propToFind = type[0].toUpperCase().concat(type.slice(1).concat('Id'));
   return db.models.Favorite.findAll({
@@ -618,6 +650,15 @@ const getFulfilledShifts = (id, histOrUpcoming) => {
     .spread(shifts => appendMakerRatingPositionToShifts(shifts));
 };
 
+const getMakerByShiftId = id => db.models.Maker.findOne({
+  include: [{
+    model: db.models.Shift,
+    where: {
+      id,
+    },
+  }],
+});
+
 const rateShift = (shiftId, werkerId, rating, type) => db.sequelize.query(`
 INSERT INTO "Ratings" ("ShiftId", "WerkerId", rating, type, "createdAt", "updatedAt") VALUES (${shiftId}, ${werkerId}, ${rating}, '${type}', 'now', 'now')`);
 
@@ -645,6 +686,7 @@ module.exports = {
   getApplicationsForShifts,
   getUnfulfilledShifts,
   getFulfilledShifts,
+  getMakerByShiftId,
   rateShift,
   addFavorite,
   deleteFavorite,
