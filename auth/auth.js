@@ -14,6 +14,8 @@ const oauth2Client = new google.auth.OAuth2(
 const getToken = (code, deviceType) => {
   if (deviceType === 'mobile') {
     oauth2Client.redirectUri = '';
+  } else {
+    oauth2Client.redirectUri = 'postmessage';
   }
   return oauth2Client.getToken(code)
     .then((tokenRes) => {
