@@ -179,6 +179,24 @@ const updateWerker = (werkerId, info) => db.models.Werker.update(info, {
         : new Promise(resolve => resolve(updatedWerker))));
 
 /**
+ * updates Maker entry in DB
+ *
+ * @param {number} makerId
+ * @param {object} info - new values
+ * @param {string} [info.name]
+ * @param {string} [info.email]
+ * @param {string} [info.phone]
+ * @param {string} [info.bio]
+ * @param {string} [info.certifications.url_Photo]
+ */
+const updateMaker = (makerId, info) => db.models.Maker.update(info, {
+  where: {
+    id: makerId,
+  },
+  returning: true,
+});
+
+/**
  * Function to search for shifts by various terms
  *
  * @param {object} terms - an object with search terms
@@ -206,19 +224,21 @@ const getShiftsByTerm = async (terms, werkerId) => {
   const conditions = {
     position: terms.position ? `sp."PositionId" = ${terms.position}` : 'sp."PositionId" IS NOT NULL',
     payment_amnt: terms.payment_amnt ? `sp.payment_amnt >= ${terms.payment_amnt}` : 'sp.payment_amnt IS NOT NULL',
-    payment_type: terms.payment_type ? `s.payment_type = ${terms.payment_type}` : 's.payment_type IS NOT NULL',
+    payment_type: terms.payment_type ? `s.payment_type = ${terms.payment_type}` : 'sp.payment_type IS NOT NULL',
   };
   return db.sequelize.query(`
-  SELECT * FROM "Shifts" s
+  SELECT s.*, p.position, sp.payment_type, sp.payment_amnt FROM "Shifts" s
   INNER JOIN "ShiftPositions" sp
   ON s.id=sp."ShiftId"
   INNER JOIN "Positions" p
   ON p.id=sp."PositionId"
   WHERE ${conditions.position} AND ${conditions.payment_amnt} AND ${conditions.payment_type} AND sp.filled=false`)
-    .spread(shifts => filterByDistance((terms.proximity || 3), {
-      latitude: werker.lat,
-      longitude: werker.long,
-    }, shifts));
+    .spread(shifts => shifts)
+    // filterByDistance((terms.proximity || 3), {
+    // latitude: werker.lat,
+    // longitude: werker.long,
+  // }, shifts))
+    .catch(err => console.error(err));
 };
 
 /**
@@ -685,6 +705,7 @@ module.exports = {
   bulkAddCertificationToWerker,
   bulkAddPositionToWerker,
   updateWerker,
+  updateMaker,
   getWerkersForShift,
   getWerkersByPosition,
   getShiftsForWerker,

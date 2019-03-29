@@ -18,8 +18,8 @@ app.use(bodyParser.json());
 app.use(cors());
 
 app.get('/login', (req, res) => {
-  const { code, type } = req.query;
-  return loginFlow(code, type)
+  const { code, type, device } = req.query;
+  return loginFlow(code, type, device)
     .then((token) => {
       if (token) {
         console.log(token);
@@ -30,14 +30,21 @@ app.get('/login', (req, res) => {
     .catch(err => res.status(500).send(err));
 });
 
-app.get('/shifts', (req, res) => {
-  dbHelpers.getAllShifts()
-    .then(shifts => res.status(200).json(shifts));
-});
 
 // NEED A VALID TOKEN BEYOND HERE //
 
 app.use(checkLogin);
+
+app.get('/shifts', (req, res) => {
+  if (!req.query || req.user.type === 'maker') {
+    return dbHelpers.getAllShifts()
+      .then(shifts => res.status(200).json(shifts))
+      .catch(err => res.status(500).send(err));
+  }
+  return dbHelpers.getShiftsByTerm(req.query, req.user.id)
+    .then(shifts => res.status(200).json(shifts))
+    .catch(err => res.status(500).send(err));
+});
 
 const errorHandler = (err, res) => {
   console.error(err);
@@ -236,6 +243,19 @@ app.patch('/werkers/:werkerId', (req, res) => {
   }
   return dbHelpers.updateWerker(werkerId, settings)
     .then(updatedWerker => res.status(204).send())
+    .catch(err => errorHandler(err, res));
+});
+
+/**
+ * PATCH /maker/:makerId
+ * expects any number of changed values according to {@link dbHelpers#updateMaker}
+ */
+app.patch('/maker/:makerId', (req, res) => {
+  const { makerId } = req.params;
+  const settings = req.body;
+  
+  return dbHelpers.updateMaker(makerId, settings)
+    .then(updatedMaker => res.status(204).send())
     .catch(err => errorHandler(err, res));
 });
 
