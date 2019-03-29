@@ -8,6 +8,7 @@ module.exports = (sequelize, DataTypes) => {
     phone: DataTypes.STRING,
     email: { type: DataTypes.STRING, allowNull: false, unique: true },
     cache_rating: DataTypes.NUMERIC,
+    bio: DataTypes.STRING,
   });
 
   return Maker;
