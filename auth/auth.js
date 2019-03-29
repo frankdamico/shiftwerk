@@ -15,7 +15,7 @@ const getToken = (code, deviceType) => {
   if (deviceType === 'mobile') {
     oauth2Client.redirectUri = '';
   }
-  oauth2Client.getToken(code)
+  return oauth2Client.getToken(code)
     .then((tokenRes) => {
       console.log(tokenRes.tokens);
       return tokenRes.tokens;
