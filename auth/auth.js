@@ -61,7 +61,6 @@ const loginFlow = (code, type, deviceType) => getToken(code, deviceType)
 const checkLogin = (req, res, next) => {
   const token = req.headers.authorization.replace('Bearer ', '');
   const { id, type } = jwt.verify(token, process.env.SUPER_SECRET_KEY);
-  console.log(id, type);
   const model = type === 'werker' ? 'Werker' : 'Maker';
   return models[model].findOne({
     where: {
@@ -116,6 +115,7 @@ const checkUser = (req, res, next) => {
 };
 
 module.exports = {
+  oauth2Client,
   loginFlow,
   checkLogin,
   checkUser,

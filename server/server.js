@@ -6,8 +6,8 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 
 const dbHelpers = require('../dbHelpers/dbHelpers.js');
-const { loginFlow, checkLogin, checkUser } = require('../auth/auth');
-
+const { loginFlow, checkLogin, checkUser, oauth2Client } = require('../auth/auth');
+const { addToCalendar } = require('../apiHelpers/google');
 const { geocode, reverseGeocode } = require('../apiHelpers/tomtom');
 const { models } = require('../db/index');
 const twilio = require('../apiHelpers/twilio');
@@ -181,7 +181,7 @@ app.get('/werkers/:werkerId/shifts', async (req, res) => {
  *   payment_amnt
  *   payment_type
  */
-app.put('/shifts', async (req, res) => {
+app.put('/shifts', (req, res) => {
   const { body } = req;
   body.positions = body.positions.map((position) => {
     const digit = /\d/.exec(Object.keys(position)[1])[0];
@@ -192,13 +192,24 @@ app.put('/shifts', async (req, res) => {
       payment_type: position[`payment_type${digit}`],
     };
   });
-  const { lat, lon } = await geocode(body.address);
-  body.address = await reverseGeocode(lat, lon);
-  body.lat = lat;
-  body.long = lon;
-  const shift = await dbHelpers.createShift(body)
-    .catch(err => errorHandler(err, res));
-  res.status(201).json(shift);
+  return geocode(body.address)
+    .then(({ lat, lon }) => {
+      body.lat = lat;
+      body.long = lon;
+      return reverseGeocode(lat, lon);
+    })
+    .then((address) => {
+      body.address = address;
+      return dbHelpers.createShift(body);
+    })
+    .then(shift => addToCalendar(
+      req.user.accessToken,
+      req.user.refreshToken,
+      body,
+      oauth2Client,
+    ))
+    .then(shift => res.status(201).json(shift))
+    .catch(err => errorHandler(err));
 });
 
 app.delete('/shifts/:shiftId', (req, res) => {
@@ -364,7 +375,17 @@ app.patch('/shifts/:shiftId/application/:werkerId/:status', (req, res) => {
   const { shiftId, werkerId, status } = req.params;
   dbHelpers.acceptOrDeclineShift(shiftId, werkerId, status)
     .then(() => {
-      res.send(204);
+      if (status === 'accept') {
+        return Promise.all([models.Werker.findByPk(werkerId), models.Shift.findByPk(shiftId)])
+          .then(([werker, shift]) => addToCalendar(
+            werker.access_token,
+            werker.refresh_token,
+            shift,
+            oauth2Client,
+          ))
+          .then(() => res.send(204));
+      }
+      return res.send(204);
     })
     .catch((error) => {
       console.log(error, 'unable to accept/decline');
