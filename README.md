@@ -18,74 +18,51 @@ shiftWerk is a community shift planning application that connects shift workers 
 1. [Contributing](#contributing)
 
 ## Usage
-// !!! UPDATE USAGE !!! //
-- npm start: starts the development server and compiles client files
 
-- npm build: compiles the current state of the client files (typically used when starting the production server)
-
-- node server/index.js: starts the production server (typically used to connect to database and complete http requests)
-
+- `npm start`: runs nodemon for development
+- use a process manager like PM2 or Forever for production
 
 ## Requirements
 
-- Node 8.15.0
-- Express 4.16.4
-- PostgreSQL 7.8.2
-- Angular 7.20
-- Ionic/angular 1.4.0
+- Node 10.15.0
+- PostgreSQL 9.6
+
+## Testing
+- `npm test`
+- to run only individual suites, `npx jest test/<insert file here>`
 
 ## Development
-
-Client Files:
-Home: 
-- home.page - entry point for new user, werker, maker
-
-New User:
-- new-user.page - login for new user(s)
-
-!!! User: (!!! we can't reuse components so these should be redistributed to werker & maker directories)
-- history, notifications, pendingshifts, schedule, 
-
-Maker:
-- maker-home - maker sees 3 shift views:  
-  - maker-unfilled-shifts - upcoming shifts (open positions available)
-  - maker-pending-shifts - maker views upcoming shifts (positions filled)
-  - maker-history-shifts - maker views past shifts, including werkers & their ratings
-
-- maker-create-shift - maker create new shift, details, positions needed
-- maker-profile - component for Maker user profile
-- maker-positions - !!! is this to create more positions??? do we need???
-- maker-search - search for werkers to invite to shift
-- maker-settings - opens maker-profile to update/edit/save
-- maker-navbar - bottom navigation(home, profile, ...)
-
-Werker:
-- werker-home - werker sees list of 
-  - werker-shift-small - condensed details of pending shifts
-  - werker-shift-expanded - expanded details of pending shift
-- werker-notifications - show shifts werker has been invited to
-
-- werker-profile - component for Werker profile
-  - werker-settings - opens werker-profile from cog to update/save
-- werker-schedule - shows upcoming shifts
-- werker-history - shows past shifts with maker ratings
-- werker-navbar - bottom navigation
-- werker-search - search for shifts
  
-Back-end Files:
+- db/index.js - the database configuration
+- server/server.js - the server
 
-- database/index.js - the database configuration
-
-- server/index.js - the server
-
-
-### Installing Dependencies
+### Installing
 
 From within the root directory:
 
 ```
 npm install
 ```
+You will need a .env file in the root directory with the following variables:
+```
+TOMTOM_API_KEY
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+DBHOST
+DBUSERNAME
+DBPASSWORD
+DBNAME
+TWILIO_SID
+TWILIO_AUTH_TOKEN
+TWILIO_PHONE
+TWILIO_MESSAGING_SERVICE_SID
+TWILIO_NOTIFY_SERVICE_SID
+SUPER_SECRET_KEY
+```
+You will need to register your project with [Google API Console](https://console.developers.google.com/apis/credentials) for your Client ID and Secret.
+You will also need an account with both [Tomtom](https://developer.tomtom.com/freemaps) (Search API) and [Twilio](https://www.twilio.com/) (Messaging and Notify services).
+
+This API server is meant to work with the client, located [here](https://github.com/daft-funk/shiftwerk-client).
 
 ### Roadmap
 
